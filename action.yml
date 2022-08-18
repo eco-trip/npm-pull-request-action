@@ -1,0 +1,92 @@
+name: "NpmPullRequest"
+description: GitHub action for pull request in npm projects"
+
+inputs:
+  prettier:
+    description: "check format with prettier"
+    required: false
+    type: boolean
+    default: true
+  eslint:
+    description: "check code with eslint"
+    required: false
+    type: boolean
+    default: true
+  test:
+    description: "exec test"
+    required: false
+    type: boolean
+    default: true
+  token:
+    description: "Personal access token to handle the repo"
+    required: false
+  github-token:
+    description: "Personal access token for tests"
+    required: false
+  test-script:
+        required: false
+        description: "A custom npm script to get coverage"
+        default: npx jest
+  working-directory:
+        required: false
+        description: "custom working directory"
+  checkout:
+    description: "Flag to indicate whether the repo should be checked out"
+    default: true
+
+runs:
+  using: "composite"
+  steps:
+      - if: ${{ inputs.checkout == 'true' }}
+        name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ inputs.github-token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      - if: ${{ inputs.prettier == 'true' && github.actor != 'dependabot[bot]' }}
+        name: Run Prettier
+        shell: bash
+        run: npm run format
+
+      - if: ${{ inputs.prettier == 'true' && github.actor != 'dependabot[bot]' }}
+        name: Check for Prettier changes
+        shell: bash
+        id: prettier
+        run: echo ::set-output name=changes::$(if git diff-index --quiet HEAD --; then echo "false"; else echo "true"; fi)
+
+      - if: steps.prettier.outputs.changes == 'true'
+        name: Commit if there are a changes
+        shell: bash
+        run: |
+          git config user.name 'MeblabsBot'
+          git config user.email 'github@meblabs.com'
+          git add --all
+          git commit -m "chore: code formatted with prettier [skip ci]"
+          git push
+
+      - if: ${{ inputs.eslint == 'true' && github.actor != 'dependabot[bot]' }}
+        name: Run Eslint
+        uses: reviewdog/action-eslint@v1
+        with:
+          reporter: github-pr-review
+          eslint_flags: '. --ext .js'
+          github_token: ${{ inputs.token }}
+
+      - if: ${{ inputs.test == 'true' }}
+        name: Run tests
+        uses: ArtiomTr/jest-coverage-report-action@v2
+        with:
+          github-token: ${{ inputs.github-token }}
+          test-script: ${{ inputs.test-script }}
+          working-directory: ${{ inputs.working-directory }}
